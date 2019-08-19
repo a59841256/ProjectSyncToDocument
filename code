@@ -1,0 +1,503 @@
+package ppm;
+
+/**********************************************
+  * [Copyright ©]
+ * 
+ * @File: LSC_PPM_008_ProjectSyncToDocument.java
+ * @author AndyHsiao
+ * @Date: 2019.07.30
+ * @editor Kedou AndyHsiao
+ * @Lasteditor AndyHsiao
+ * @LastModifiedDate: 2019.07.31
+ * @Version: 1.0
+ * @Since: JRE 1.7 AGILE 9.3.3
+ **********************************************/
+import java.text.SimpleDateFormat;
+import java.util.Collection;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.TimeZone;
+import com.agile.api.IAgileList;
+import com.agile.api.IAgileSession;
+import com.agile.api.IDataObject;
+import com.agile.api.IItem;
+import com.agile.api.INode;
+import com.agile.api.IProgram;
+import com.agile.api.IProperty;
+import com.agile.api.IQuery;
+import com.agile.api.IRow;
+import com.agile.api.ITable;
+import com.agile.api.IUser;
+import com.agile.api.ProgramConstants;
+import com.agile.api.PropertyConstants;
+import com.agile.px.ActionResult;
+import com.agile.px.EventActionResult;
+import com.agile.px.EventConstants;
+import com.agile.px.IEventAction;
+import com.agile.px.IEventInfo;
+import com.agile.px.IObjectEventInfo;
+import com.agile.px.ISaveAsEventInfo;
+import com.agile.px.IUpdateEventInfo;
+import com.anselm.plm.utilobj.Ini;
+
+import Record.Log;
+import Record.MyTimeStamp;
+
+public class LSC_PPM_008_ProjectSyncToDocument implements IEventAction {
+	/**********************************************************************
+	 * 內部變數 log : 自定義方便debug的log物件 ini : 主要程式設定檔 CodeName: 程式名稱
+	 **********************************************************************/
+//	private static Log log = null;
+	private Ini ini = null;
+	private final String CodeName = "LSC_PPM_008_ProjectSyncToDocument";
+	private Collection<IUser> adminCollection = new HashSet<IUser>();
+	private IItem item = null;
+	private static HashMap map = new HashMap();
+
+	/**********************************************************************
+	 * 初始化
+	 **********************************************************************/
+	private void init() {
+		try {
+//			log = new Log(CodeName);
+			ini = new Ini("C:/Agile/Config.ini");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	/**********************************************************************
+	 * 解構&釋放
+	 **********************************************************************/
+	public void close(Log log) {
+		try {
+			if (log != null)
+				log.close();
+			log = null;
+			ini = null;
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public EventActionResult doAction(IAgileSession session, INode node, IEventInfo info) {
+		init();
+		Log log = new Log(CodeName);
+		try {
+			session.getAdminInstance();
+			log.setLogFile(ini.getValue("Program Use", "LogFile") + CodeName + MyTimeStamp.MyDateStamp() + ".log",
+					true);
+			log.logSeparatorBar();
+			log.log(log.getCurrentTimeString());
+			log.logHeading(CodeName);
+			log.setTopic(CodeName);
+			String eventType = "";
+			// 判斷 Event 的 Type 為何，並將當前 EventType 印在Log裡
+			if (info.getEventType() == EventConstants.EVENT_SAVE_AS_OBJECT) {
+				log.log(1, "當前 EventType 為 Save As. ");
+				ISaveAsEventInfo oinfo = (ISaveAsEventInfo) info;
+				item = (IItem) session.getObject(IItem.OBJECT_TYPE, oinfo.getNewNumber());
+				eventType = "Save As";
+			} else if (info.getEventType() == EventConstants.EVENT_UPDATE_TITLE_BLOCK) {
+				log.log(1, "當前 EventType 為 UpdateTitleBlock. ");
+				IObjectEventInfo oinf = (IObjectEventInfo) info;
+				IDataObject obj = oinf.getDataObject();
+				item = (IItem) session.getObject(IItem.OBJECT_TYPE, obj.getName());
+				eventType = "Update Title Block";
+			} else if (info.getEventType() == EventConstants.EVENT_CREATE_OBJECT) {
+				log.log(1, "當前 EventType 為 Create Object. ");
+				IObjectEventInfo oinf = (IObjectEventInfo) info;
+				IDataObject obj = oinf.getDataObject();
+				item = (IItem) session.getObject(IItem.OBJECT_TYPE, obj.getName());
+				eventType = "Create Object";
+			}
+			String err = "";
+			err += action(session, item, info, log);// ?
+			return new EventActionResult(info, new ActionResult(ActionResult.STRING, eventType + " finish"));// ?
+		} catch (Exception e) {
+			log.logException(e);
+			return new EventActionResult(info, new ActionResult(ActionResult.EXCEPTION, e));
+		} finally {
+			close(log);
+		}
+
+	}
+
+	/**********************************************************************
+	 * Event Interface - 事件介面 (請在此修改相對的事件介面)
+	 **********************************************************************/
+
+	public String action(IAgileSession session, IDataObject ido, IEventInfo info, Log log) throws Exception {
+		String err = "";
+		try {
+			IObjectEventInfo objInfo = (IObjectEventInfo) info;
+			IUpdateEventInfo eventinfo = (IUpdateEventInfo) info;
+			Integer[] att = eventinfo.getAttributeIds();
+			IItem item1 = (IItem) session.getObject(IItem.OBJECT_TYPE, ido.getName());
+			String itemsub = item.getValue(1081).toString().substring(0, 2);
+			log.log(1, "Document : " + item.getValue(1081).toString());
+			log.log(2, "Document Number: " + item.getName());
+			// 判斷當前為哪個Event
+			if (info.getEventType() == EventConstants.EVENT_UPDATE_TITLE_BLOCK
+					|| info.getEventType() == EventConstants.EVENT_CREATE_OBJECT) {
+				// 檢查Document的開頭是否符合
+				if (itemsub.equals("P0") || itemsub.equals("P1") || itemsub.equals("P2") || itemsub.equals("P3")
+						|| itemsub.equals("P4") || itemsub.equals("P5")) {
+					log.log(1, "檢查Project Name 欄位的值是否有變更");// ?
+					boolean stop = true;
+					// 判斷Project Name 欄位是否有被變更
+					for (int n = 0; n < att.length; n++) {
+						try {
+							if (att[n].intValue() == 1277) { // Project Name BaseID = 1277
+								log.log(2, "確認Project Name 欄位的值有變更");
+								stop = false;
+								if (item1.getValue(1277).toString().equals(item1.getValue(2481754).toString())) {// 比對新舊值是否相等，如果相等則不動作
+
+								} else {
+									log.log(2, "確認新舊值 : 無相等，開始帶入以下欄位");// ?
+									// 透過Query使用ProjectName來搜尋對應的Project
+									IQuery changeQuery = (IQuery) (session.createObject(IQuery.OBJECT_TYPE,
+											ProgramConstants.CLASS_ACTIVITIES_CLASS));
+									// 針對 1277 欄位的值去搜尋是否有對應的Project Name
+									String queryCondition = "[" + ProgramConstants.ATT_GENERAL_INFO_NAME + "] == '"
+											+ item1.getValue(1277).toString() + "'";
+									changeQuery.setCaseSensitive(false);
+									changeQuery.setCriteria(queryCondition);
+									ITable itableData = changeQuery.execute();
+									Iterator<?> itable = itableData.iterator();
+									if (!itable.hasNext()) {
+										log.log(3, "當前並無符合專案");
+										err += "no Project match with ProjectName";
+										throw new Exception("no Project match with ProjectName");
+									} else {
+										IRow row = (IRow) itable.next();
+										IProgram prog = (IProgram) row.getReferent();
+										log.log(3, "Project Name : " + prog.getCell(18040).getValue().toString());
+
+										/*
+										 * ctc為一個Function，為自己撰寫的一個Function，可透過下方維護。 ctc(帶入來源, 帶入目的, 帶入來源欄位的BaseID,
+										 * 帶入目的欄位的BaseID)
+										 */
+
+										// item新舊值比對
+										log.log(3, "1 " + item.getCell(1277).getName() + " :　" + item.getValue(1277));
+										err += ctc(item, item, 1277, 2481754, log);
+
+										// Project_Package to Document_Package
+										log.log(3, "2 " + prog.getCell(2000000180).getName() + " :　"
+												+ prog.getValue(2000000180));
+										err += ctc(prog, item, 2000000180, 2092, log);
+
+										// Project_Device to Document_Device
+										log.log(3, "3 " + prog.getCell(2000009359).getName() + " : "
+												+ prog.getValue(2000009359));
+										err += ctc(prog, item, 2000009359, 2000008063, log);
+
+										// Project_ATSite to Document_ATSite
+										log.log(3, "4 " + prog.getCell(2000000178).getName() + " : "
+												+ prog.getValue(2000000178));
+										err += ctc(prog, item, 2000000178, 2000008064, log);
+
+										// Project_WaferSite to Document_WaferSite
+										log.log(3, "5 " + prog.getCell(2000000179).getName() + " : "
+												+ prog.getValue(2000000179));
+										err += ctc(prog, item, 2000000179, 2000008065, log);
+
+										// Project_ProductLine to Document_LOB
+										log.log(3, "6 " + prog.getCell(2000000086).getName() + " : "
+												+ prog.getValue(2000000086));
+										err += ctc(prog, item, 2000000086, 1278, log);
+
+										// Project_Project Team Member(RD核心成員) to Document_Project Team Member(RD核心成員)
+										log.log(3, "7 " + prog.getCell(2000009360).getName() + " : "
+												+ prog.getValue(2000009360));
+										err += ctc(prog, item, 2000009360, 2000008066, log);
+
+									}
+									// 帶入值
+									item.setValues(map);
+								}
+							}
+						} catch (Exception e) {
+							log.logException(e);
+						}
+					}
+					// 欄位值沒有變，程式終止
+					if (stop) {
+						log.log("Project Name 欄位並無更動，程式終止");
+					}
+				}
+				// 判斷當前為哪個Event
+			} else if (info.getEventType() == EventConstants.EVENT_SAVE_AS_OBJECT) {
+				// 檢查Document的開頭是否符合
+				if (itemsub.equals("P0") || itemsub.equals("P1") || itemsub.equals("P2") || itemsub.equals("P3")
+						|| itemsub.equals("P4") || itemsub.equals("P5")) {
+					// 判斷Project Name 欄位是否有被變更
+					try {
+						// 透過Query使用ProjectName來搜尋對應的Project
+						IQuery changeQuery = (IQuery) (session.createObject(IQuery.OBJECT_TYPE,
+								ProgramConstants.CLASS_ACTIVITIES_CLASS));
+						// 針對 1277 欄位的值去搜尋是否有對應的Project Name
+						String queryCondition = "[" + ProgramConstants.ATT_GENERAL_INFO_NAME + "] == '"
+								+ item1.getValue(1277).toString() + "'";
+						changeQuery.setCaseSensitive(false);
+						changeQuery.setCriteria(queryCondition);
+						ITable itableData = changeQuery.execute();
+						Iterator<?> itable = itableData.iterator();
+						if (!itable.hasNext()) {
+							log.log(3, "當前並無符合專案");
+							err += "no Project match with ProjectName";
+							throw new Exception("no Project match with ProjectName");
+						} else {
+							IRow row = (IRow) itable.next();
+							IProgram prog = (IProgram) row.getReferent();
+							log.log(3, "Project Name : " + prog.getCell(18040).getValue().toString());
+
+							/*
+							 * ctc為一個Function，為自己撰寫的一個Function，可透過下方維護。 ctc(帶入來源, 帶入目的, 帶入來源欄位的BaseID,
+							 * 帶入目的欄位的BaseID)
+							 */
+
+							// item新舊值比對
+							log.log(3, "1 " + item.getCell(1277).getName() + " :　" + item.getValue(1277));
+							err += ctc(item, item, 1277, 2481754, log);
+
+							// Project_Package to Document_Package
+							log.log(3, "2 " + prog.getCell(2000000180).getName() + " :　" + prog.getValue(2000000180));
+							err += ctc(prog, item, 2000000180, 2092, log);
+
+							// Project_Device to Document_Device
+							log.log(3, "3 " + prog.getCell(2000009359).getName() + " : " + prog.getValue(2000009359));
+							err += ctc(prog, item, 2000009359, 2000008063, log);
+
+							// Project_ATSite to Document_ATSite
+							log.log(3, "4 " + prog.getCell(2000000178).getName() + " : " + prog.getValue(2000000178));
+							err += ctc(prog, item, 2000000178, 2000008064, log);
+
+							// Project_WaferSite to Document_WaferSite
+							log.log(3, "5 " + prog.getCell(2000000179).getName() + " : " + prog.getValue(2000000179));
+							err += ctc(prog, item, 2000000179, 2000008065, log);
+
+							// Project_ProductLine to Document_LOB
+							log.log(3, "6 " + prog.getCell(2000000086).getName() + " : " + prog.getValue(2000000086));
+							err += ctc(prog, item, 2000000086, 1278, log);
+
+							// Project_Project Team Member(RD核心成員) to Document_Project Team Member(RD核心成員)
+							log.log(3, "7 " + prog.getCell(2000009360).getName() + " : " + prog.getValue(2000009360));
+							err += ctc(prog, item, 2000009360, 2000008066, log);
+
+						}
+						// 帶入值
+						item.setValues(map);
+
+					} catch (Exception e) {
+						log.logException(e);
+					}
+
+				}
+			}
+		} catch (Exception e) {
+			log.logException(e);
+		}
+		if (!err.equals("")) {
+			log.log("err:" + err);
+			throw new Exception(err);
+		}
+		return err;
+	}// end for action
+
+	public static String ctc(IDataObject ido1, IDataObject ido2, int BaseID1, int BaseID2, Log log) {
+		/* ido1 to ido2 with map */
+		/******************************************************************
+		 * UNKNOWN 0 DOUBLE 8 INTEGER 1 TABLE 9 STRING 2 WORKFLOW 10 DATE 3
+		 * UNIT_OF_MEASURE 11 SINGLELIST 4 RULE 12 OBJECT 6 FTS 13 MONEY 7
+		 ******************************************************************/
+		String err = "";
+		try {
+			int BaseType1 = ido1.getCell(BaseID1).getDataType();
+			int BaseType2 = ido2.getCell(BaseID2).getDataType();
+			if (BaseType1 == 2 && BaseType2 == 2) {
+				// Text to Text
+				if (ido2.getValue(BaseID2).toString().equals(ido1.getValue(BaseID1).toString())) {
+				} else {
+					map.put(BaseID2, ido1.getValue(BaseID1));
+					log.log(4,
+							ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName() + " 欄位已經帶入完畢");
+				}
+			} else if (BaseType1 == 3 && BaseType2 == 2) {
+				// Date to Text
+				SimpleDateFormat sdf = new SimpleDateFormat("dd-MMM-yyyy");
+//			sdf.setTimeZone(TimeZone.getTimeZone("GMT"));
+				Date prodate = (Date) ido1.getValue(BaseID1);
+				String NewDate = sdf.format(prodate);
+				if (NewDate.equals(ido2.getValue(BaseID2))) {
+				} else {
+					map.put(BaseID2, NewDate);
+					log.log(4,
+							ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName() + " 欄位已經帶入完畢");
+				}
+			} else if (BaseType1 == 3 && BaseType2 == 3) {
+				//
+				SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+				SimpleDateFormat sdfe = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.CHINESE);
+				Date prodate = (Date) ido1.getValue(BaseID1);
+				Date itemdate = (Date) ido2.getValue(BaseID2);
+				String NewDate = sdf.format(prodate);
+				Date finnewdate = sdfe.parse(NewDate);
+				log.log(3, finnewdate);
+				if (itemdate == null) {
+					map.put(BaseID2, finnewdate);// ido2.setValue(BaseID2, finnewdate);
+					log.log(4,
+							ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName() + " 欄位已經帶入完畢");
+				} else {
+					String OldDate = sdf.format(itemdate);
+					if (NewDate.equals(OldDate)) {
+					} else {
+						map.put(BaseID2, finnewdate);
+						log.log(4, ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName()
+								+ " 欄位已經帶入完畢");
+					}
+				}
+			} else if (BaseType1 == 8 && BaseType2 == 2) {
+				// Numeric to Text
+				if (ido2.getValue(BaseID2).toString().equals(ido1.getValue(BaseID1).toString())) {
+				} else {
+					map.put(BaseID2, ido1.getValue(BaseID1));
+					log.log(4,
+							ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName() + " 欄位已經帶入完畢");
+				}
+			} else if (BaseType1 == 2 && BaseType2 == 8) {
+				// Text to Numeric
+				Double idod = (Double) ido2.getValue(BaseID2);
+				if (idod.intValue() == Integer.parseInt(ido1.getValue(BaseID1).toString())) {
+				} else {
+					map.put(BaseID2, ido1.getValue(BaseID1));
+					log.log(4,
+							ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName() + " 欄位已經帶入完畢");
+				}
+			} else if (BaseType1 == 4 && BaseType2 == 4) {
+				// List to List
+				IProperty propListCH = ido1.getCell(BaseID1).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				IProperty propListIT = ido2.getCell(BaseID2).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				if (propListIT.toString().split(":")[1].equals(propListCH.toString().split(":")[1])) {
+					IAgileList list = (IAgileList) ido1.getCell(BaseID1).getValue();
+					IAgileList[] selected = list.getSelection();
+					if (selected.length == 0) {
+						log.log("程式執行錯誤 : " + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty  ");
+						map.put(BaseID2, null);
+						err += ido1.getName() + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty.  ";
+					} else {
+						if (ido2.getValue(BaseID2).toString().equals(ido1.getValue(BaseID1).toString())) {
+						} else {
+							Object user = (Object) selected[0].getValue();
+							map.put(BaseID2, user);
+							log.log(4, ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName()
+									+ " 欄位已經帶入完畢");
+						}
+					}
+				} else {
+					err += "Error: '" + ido2.getCell(BaseID2).getName() + "' List Type is "
+							+ propListIT.toString().split(":")[1] + " '" + ido1.getCell(BaseID1).getName()
+							+ "' List Type is " + propListCH.toString().split(":")[1];
+				}
+			} else if (BaseType1 == 5 && BaseType2 == 4) {
+				// Multilist to List
+				IProperty propListCH = ido1.getCell(BaseID1).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				IProperty propListIT = ido2.getCell(BaseID2).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				if (propListIT.toString().split(":")[1].equals(propListCH.toString().split(":")[1])) {
+					IAgileList list = (IAgileList) ido1.getCell(BaseID1).getValue();
+					IAgileList[] selected = list.getSelection();
+					if (selected.length == 0) {
+						log.log("程式執行錯誤 : " + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty  ");
+						map.put(BaseID2, null);
+						err += ido1.getName() + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty.  ";
+//					throw new Exception(ido1.getCell(BaseID1).getAttribute().getName() + " is empty  ");
+					} else {
+						Object obj = (Object) selected[0].getValue();
+						if (ido2.getValue(BaseID2).toString().equals(obj.toString())) {
+						} else {
+							map.put(BaseID2, obj);
+							log.log(4, ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName()
+									+ " 欄位已經帶入完畢");
+						}
+					}
+				} else {
+					err += "Error: '" + ido2.getCell(BaseID2).getName() + "' List Type is "
+							+ propListIT.toString().split(":")[1] + " '" + ido1.getCell(BaseID1).getName()
+							+ "' List Type is " + propListCH.toString().split(":")[1];
+				}
+			} else if (BaseType1 == 4 && BaseType2 == 5) {
+				// List to Multilist
+				IProperty propListCH = ido1.getCell(BaseID1).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				IProperty propListIT = ido2.getCell(BaseID2).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				if (propListIT.toString().split(":")[1].equals(propListCH.toString().split(":")[1])) {
+					IAgileList list = (IAgileList) ido1.getCell(BaseID1).getValue();
+					IAgileList[] selected = list.getSelection();
+					if (selected.length == 0) {
+						log.log("程式執行錯誤 : " + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty  ");
+						err += ido1.getName() + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty.  ";
+//					throw new Exception(ido1.getCell(BaseID1).getAttribute().getName() + " is empty  ");
+					} else {
+						if (ido2.getValue(BaseID2).toString().equals(ido1.getValue(BaseID1).toString())) {
+						} else {
+							Object obj = (Object) selected[0].getValue();
+							map.put(BaseID2, obj);
+							log.log(4, ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName()
+									+ " 欄位已經帶入完畢");
+						}
+					}
+				} else {
+					err += "Error: '" + ido2.getCell(BaseID2).getName() + "' List Type is "
+							+ propListIT.toString().split(":")[1] + " '" + ido1.getCell(BaseID1).getName()
+							+ "' List Type is " + propListCH.toString().split(":")[1];
+				}
+			} else if (BaseType1 == 5 && BaseType2 == 5) {
+				IProperty propListCH = ido1.getCell(BaseID1).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				IProperty propListIT = ido2.getCell(BaseID2).getAttribute().getProperty(PropertyConstants.PROP_LIST);
+				if (propListIT.toString().split(":")[1].equals(propListCH.toString().split(":")[1])) {
+					IAgileList list = (IAgileList) ido1.getCell(BaseID1).getValue();
+					IAgileList[] selected = list.getSelection();
+					if (selected.length == 0) {
+						log.log("程式執行錯誤 : " + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty  ");
+						map.put(BaseID2, null);
+						err += ido1.getName() + " BaseID : " + BaseID1 + " "
+								+ ido1.getCell(BaseID1).getAttribute().getName() + " is empty.  ";
+					} else {
+						if (ido2.getValue(BaseID2).toString().equals(ido1.getValue(BaseID1).toString())) {
+						} else {
+							Object[] user = new Object[selected.length];
+							for (int n = 0; n < selected.length; n++) {
+								user[n] = (Object) selected[n].getValue();
+							} // for end
+							IAgileList value = ido2.getCell(BaseID2).getAvailableValues();
+							value.setSelection(user);
+							map.put(BaseID2, value);
+							log.log(4, ido1.getCell(BaseID1).getName() + " To " + ido2.getCell(BaseID2).getName()
+									+ " 欄位已經帶入完畢");
+						}
+					}
+				} else {
+					err += "Error: '" + ido2.getCell(BaseID2).getName() + "' List Type is "
+							+ propListIT.toString().split(":")[1] + " '" + ido1.getCell(BaseID1).getName()
+							+ "' List Type is " + propListCH.toString().split(":")[1] + "\n";
+				}
+			}
+		} catch (Exception e) {
+			return e.toString();
+		}
+		if (!err.equals("")) {
+			log.log("err:" + err);
+		}
+		return err;
+	}// ctc end
+}
